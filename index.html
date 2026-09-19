@@ -135,18 +135,10 @@
       <div class="settings-card" style="max-width:900px">
         <p class="eyebrow">COMPTES</p>
         <h2>Gestion des comptes</h2>
-        <p style="color:var(--muted);line-height:1.6;margin:6px 0 0">Créez et administrez les comptes. Un nouveau compte est <strong>utilisateur</strong> par défaut ; vous pouvez le promouvoir administrateur. Chaque compte possède sa propre cave.</p>
-        <div class="admin-add">
-          <input id="adminNewName" placeholder="Nom du nouveau compte" maxlength="24">
-          <select id="adminNewRole">
-            <option value="user">Utilisateur</option>
-            <option value="admin">Administrateur</option>
-          </select>
-          <button class="primary" id="adminAddBtn">Créer le compte</button>
-        </div>
+        <p style="color:var(--muted);line-height:1.6;margin:6px 0 18px">Les utilisateurs créent eux-mêmes leur compte (rôle <strong>utilisateur</strong> par défaut). Vous pouvez ici les <strong>renommer</strong> et gérer leurs <strong>rôles</strong>.</p>
         <div class="admin-table" id="adminTable"></div>
         <div class="future-box" style="margin-top:22px">
-          <span>🔒</span><div><strong>Portée de l'administration</strong><p>Les rôles et les codes sont gérés dans l'application, sur cet appareil. Pour une gouvernance réellement inviolable, il faudra un serveur avec authentification — prévu à l'étape en ligne.</p></div>
+          <span>🔒</span><div><strong>Sécurité côté serveur</strong><p>Les rôles sont appliqués par la base (Supabase / RLS) : un utilisateur ne peut pas s'auto-promouvoir. La suppression complète d'un compte se fait depuis le tableau de bord Supabase.</p></div>
         </div>
       </div>
     </section>
@@ -217,15 +209,33 @@
     <div class="modal-card profile-modal-card">
       <button class="close" id="closeProfileModal">×</button>
       <p class="eyebrow">COMPTES</p>
-      <h2>Changer de profil</h2>
-      <p class="profile-help">Chaque profil possède sa propre cave. Touchez un profil pour l'ouvrir (un code peut être demandé). La création et la gestion des comptes se font dans l'Administration.</p>
+      <h2>Mon compte</h2>
       <div id="profileList" class="profile-list"></div>
-      <button class="secondary full" id="gotoAdminBtn" style="display:none">⚑ Gérer les comptes</button>
+      <button class="secondary full" id="gotoAdminBtn" style="display:none;margin-bottom:10px">⚑ Gérer les comptes</button>
+      <button class="secondary full" id="logoutBtn">Se déconnecter</button>
     </div>
   </div>
 
   <!-- Notification (toast) -->
+  <!-- Écran de connexion (masque l'app tant qu'on n'est pas connecté) -->
+  <div id="authGate" class="auth-gate" style="display:none">
+    <form id="authForm" class="auth-card" autocomplete="on">
+      <div class="auth-brand"><span class="brand-mark">🍷</span> <strong>LE BAR</strong></div>
+      <h2 id="authTitle">Connexion</h2>
+      <label>E-mail<input type="email" id="authEmail" autocomplete="email" required></label>
+      <label>Mot de passe<input type="password" id="authPassword" autocomplete="current-password" required></label>
+      <div id="authError" class="auth-error" style="display:none"></div>
+      <button class="primary full" type="submit" id="authSubmit">Se connecter</button>
+      <p class="auth-switch" id="authSwitch"></p>
+    </form>
+  </div>
+
   <div class="toast" id="toast"></div>
+
+  <!-- Backend : Supabase (base externe) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="db.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

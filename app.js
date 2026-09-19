@@ -5,72 +5,14 @@ const SETTINGS_KEY = "le-bar-settings";
 const DEFAULT_MODEL = "claude-sonnet-5";
 let settings = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
 
-/* ===== Profils (comptes locaux) ===== */
-const PROFILES_KEY = "le-bar:profiles";
-const ACTIVE_KEY = "le-bar:active";
-const bottlesKeyFor = (id) => "le-bar:bottles:" + id;
-const newId = () =>
-  window.crypto && crypto.randomUUID
-    ? crypto.randomUUID()
-    : Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-function loadProfiles() {
-  try {
-    return JSON.parse(localStorage.getItem(PROFILES_KEY)) || [];
-  } catch (e) {
-    return [];
-  }
-}
-function persistProfiles() {
-  localStorage.setItem(PROFILES_KEY, JSON.stringify(profiles));
-}
-let profiles = loadProfiles();
-function legacyBottles() {
-  let l = localStorage.getItem("le-bar-v1") || localStorage.getItem("ma-cave-v1");
-  if (l) {
-    try {
-      const a = JSON.parse(l);
-      if (Array.isArray(a)) return a;
-    } catch (e) {}
-  }
-  return null;
-}
-if (profiles.length === 0) {
-  const id = newId();
-  profiles = [{ id, name: "Moi", pin: "", role: "admin", createdAt: Date.now() }];
-  persistProfiles();
-  localStorage.setItem(ACTIVE_KEY, id);
-  // Reprise des anciennes données mono-cave si présentes, sinon cave vide
-  localStorage.setItem(bottlesKeyFor(id), JSON.stringify(legacyBottles() || []));
-}
-let activeId = localStorage.getItem(ACTIVE_KEY) || profiles[0].id;
-if (!profiles.some((p) => p.id === activeId)) {
-  activeId = profiles[0].id;
-  localStorage.setItem(ACTIVE_KEY, activeId);
-}
-// Réparation : profil actif sans cave enregistrée -> reprise des données héritées si disponibles
-if (localStorage.getItem(bottlesKeyFor(activeId)) === null) {
-  localStorage.setItem(bottlesKeyFor(activeId), JSON.stringify(legacyBottles() || []));
-}
-const activeProfile = () => profiles.find((p) => p.id === activeId) || profiles[0];
-// Migration des rôles (installations antérieures sans rôle)
-let _roleMig = false;
-profiles.forEach((p) => {
-  if (!p.role) {
-    p.role = "user";
-    _roleMig = true;
-  }
-});
-if (!profiles.some((p) => p.role === "admin")) {
-  (profiles.find((p) => p.id === activeId) || profiles[0]).role = "admin";
-  _roleMig = true;
-}
-if (_roleMig) persistProfiles();
-const isAdmin = () => activeProfile().role === "admin";
-
-let bottles = JSON.parse(localStorage.getItem(bottlesKeyFor(activeId)) || "null") || [];
+/* ===== État (rempli après connexion Supabase) ===== */
+let ME = null; // utilisateur connecté : { id, email, role, name }
+let bottles = []; // cave de l'utilisateur, chargée depuis la base
 let activeFilter = "Toutes";
 let editingId = null;
-let photoData = "";
+let editingPhotoPath = ""; // chemin Storage de la photo en cours d'édition
+let photoData = ""; // aperçu : "" | URL existante | data:... (nouvelle image)
+const isAdmin = () => !!(ME && ME.role === "admin");
 
 // ==========================================================================
 // UTILITAIRES
@@ -80,9 +22,7 @@ const $$ = (s) => [...document.querySelectorAll(s)];
 const euro = (n) =>
   new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(Number(n) || 0);
 
-function save() {
-  localStorage.setItem(bottlesKeyFor(activeId), JSON.stringify(bottles));
-}
+function save() {} // persistance gérée par Supabase (DB.saveBottle / DB.deleteBottle)
 function toast(msg) {
   const t = $("#toast");
   t.textContent = msg;
@@ -127,13 +67,19 @@ function bindCards(container) {
       if (e.target.closest(".favorite")) return;
       openModal(c.dataset.id);
     });
-    c.querySelector(".favorite").addEventListener("click", (e) => {
+    c.querySelector(".favorite").addEventListener("click", async (e) => {
       e.stopPropagation();
       const b = bottles.find((x) => x.id === c.dataset.id);
       b.favorite = !b.favorite;
-      save();
       render();
-      toast(b.favorite ? "Ajouté aux favoris" : "Retiré des favoris");
+      try {
+        await DB.saveBottle(b);
+        toast(b.favorite ? "Ajouté aux favoris" : "Retiré des favoris");
+      } catch (err) {
+        b.favorite = !b.favorite;
+        render();
+        toast("Erreur : " + (err.message || err));
+      }
     });
   });
 }
@@ -241,7 +187,7 @@ function render() {
 // NAVIGATION ENTRE LES VUES
 // ==========================================================================
 function showView(view) {
-  if (view === "admin" && !(activeProfile().role === "admin")) view = "dashboard";
+  if (view === "admin" && !isAdmin()) view = "dashboard";
   $$(".view").forEach((v) => v.classList.add("hidden"));
   $(`#${view}View`).classList.remove("hidden");
   $$(".nav-item").forEach((n) => n.classList.toggle("active", n.dataset.view === view));
@@ -264,6 +210,7 @@ $$("[data-view-target]").forEach((n) => (n.onclick = () => showView(n.dataset.vi
 function openModal(id = null) {
   editingId = id;
   photoData = "";
+  editingPhotoPath = "";
   const form = $("#bottleForm");
   form.reset();
   $("#photoPreview").innerHTML = "🍷";
@@ -281,6 +228,7 @@ function openModal(id = null) {
       if (el) el.value = v ?? "";
     });
     photoData = b.photo || "";
+    editingPhotoPath = b.photoPath || "";
     if (photoData) $("#photoPreview").innerHTML = `<img src="${photoData}" alt="">`;
   }
   $("#modal").classList.remove("hidden");
@@ -302,38 +250,73 @@ $("#photoInput").onchange = (e) => {
   });
 };
 
-$("#bottleForm").onsubmit = (e) => {
+$("#bottleForm").onsubmit = async (e) => {
   e.preventDefault();
   const data = Object.fromEntries(new FormData(e.target).entries());
   ["vintage", "quantity", "purchasePrice", "currentValue", "rating"].forEach(
     (k) => (data[k] = Number(data[k] || 0)),
   );
-  data.photo = photoData;
-  if (editingId) {
-    const i = bottles.findIndex((b) => b.id === editingId);
-    data.id = editingId;
-    data.favorite = bottles[i].favorite;
-    bottles[i] = data;
-    toast("Bouteille modifiée");
-  } else {
-    data.id = crypto.randomUUID();
-    data.favorite = false;
-    bottles.unshift(data);
-    toast("Bouteille ajoutée à la cave");
+  const btn = e.target.querySelector('button[type="submit"]');
+  if (btn) btn.disabled = true;
+  try {
+    // Photo : nouvelle image (data:) -> upload Storage ; sinon on conserve l'URL
+    if (photoData && photoData.indexOf("data:") === 0) {
+      const blob = await (await fetch(photoData)).blob();
+      const up = await DB.uploadPhoto(blob);
+      if (editingPhotoPath) {
+        try {
+          await DB.deletePhoto(editingPhotoPath);
+        } catch (e2) {}
+      }
+      data.photo = up.url;
+      data.photoPath = up.path;
+    } else {
+      data.photo = photoData || "";
+      data.photoPath = editingPhotoPath || "";
+    }
+    if (editingId) {
+      const cur = bottles.find((b) => b.id === editingId) || {};
+      data.id = editingId;
+      data.favorite = cur.favorite || false;
+    } else {
+      data.favorite = false;
+    }
+    const saved = await DB.saveBottle(data);
+    if (editingId) {
+      const i = bottles.findIndex((b) => b.id === editingId);
+      if (i > -1) bottles[i] = saved;
+      else bottles.unshift(saved);
+      toast("Bouteille modifiée");
+    } else {
+      bottles.unshift(saved);
+      toast("Bouteille ajoutée à la cave");
+    }
+    closeModal();
+    render();
+  } catch (err) {
+    toast("Erreur : " + (err.message || err));
+  } finally {
+    if (btn) btn.disabled = false;
   }
-  save();
-  closeModal();
-  render();
 };
 
-$("#deleteBtn").onclick = () => {
+$("#deleteBtn").onclick = async () => {
   if (!editingId) return;
-  if (confirm("Supprimer cette bouteille de la cave ?")) {
-    bottles = bottles.filter((b) => b.id !== editingId);
-    save();
+  if (!confirm("Supprimer cette bouteille de la cave ?")) return;
+  try {
+    const b = bottles.find((x) => x.id === editingId);
+    await DB.deleteBottle(editingId);
+    if (b && b.photoPath) {
+      try {
+        await DB.deletePhoto(b.photoPath);
+      } catch (e2) {}
+    }
+    bottles = bottles.filter((x) => x.id !== editingId);
     closeModal();
     render();
     toast("Bouteille supprimée");
+  } catch (err) {
+    toast("Erreur : " + (err.message || err));
   }
 };
 $("#searchInput").oninput = renderCellar;
@@ -343,17 +326,17 @@ $("#sortSelect").onchange = renderCellar;
 // SAUVEGARDE & RESTAURATION
 // ==========================================================================
 function exportCave() {
-  const p = activeProfile();
+  const who = (ME && ME.name) || "cave";
   const payload = {
     app: "Le Bar",
-    version: 1,
-    profile: p.name,
+    version: 2,
+    profile: who,
     exportedAt: new Date().toISOString(),
     bottles,
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const slug =
-    (p.name || "cave")
+    who
       .toLowerCase()
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
@@ -364,22 +347,28 @@ function exportCave() {
   a.download = `le-bar-${slug}-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
-  toast("Sauvegarde exportée : " + p.name);
+  toast("Sauvegarde exportée");
 }
 function importCave(input) {
   const file = input.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = () => {
+  reader.onload = async () => {
     try {
       const data = JSON.parse(reader.result);
-      if (!Array.isArray(data.bottles)) throw new Error();
-      bottles = data.bottles;
-      save();
+      const list = Array.isArray(data) ? data : data.bottles;
+      if (!Array.isArray(list)) throw new Error("format");
+      toast("Import en cours…");
+      for (const b of list) {
+        const copy = Object.assign({}, b);
+        delete copy.id; // insertion comme nouvel enregistrement
+        await DB.saveBottle(copy);
+      }
+      bottles = await DB.listBottles();
       render();
-      toast("Cave restaurée avec succès");
-    } catch {
-      alert("Fichier de sauvegarde invalide.");
+      toast("Cave importée (" + list.length + ")");
+    } catch (err) {
+      alert("Import impossible : " + (err.message || err));
     }
     input.value = "";
   };
@@ -525,69 +514,48 @@ loadSettingsUI();
 
 /* ================= Gestion des profils ================= */
 function renderProfileChip() {
-  const p = activeProfile();
   const av = document.querySelector("#profileAvatar"),
     nm = document.querySelector("#profileName"),
     rl = document.querySelector("#profileRole");
-  const initial = ((p.name || "?").trim().charAt(0) || "?").toUpperCase();
-  if (av) av.textContent = initial;
-  if (nm) nm.textContent = p.name || "Profil";
-  if (rl) rl.textContent = p.role === "admin" ? "Administrateur" : "Utilisateur";
+  const name = (ME && ME.name) || "—";
+  if (av) av.textContent = (name.trim().charAt(0) || "?").toUpperCase();
+  if (nm) nm.textContent = name;
+  if (rl) rl.textContent = ME ? (ME.role === "admin" ? "Administrateur" : "Utilisateur") : "";
   const navAdmin = document.querySelector("#navAdmin");
   if (navAdmin) navAdmin.style.display = isAdmin() ? "" : "none";
-  const gotoAdmin = document.querySelector("#gotoAdminBtn");
-  if (gotoAdmin) gotoAdmin.style.display = isAdmin() ? "" : "none";
-}
-function renderProfileList() {
-  const list = document.querySelector("#profileList");
-  if (!list) return;
-  list.innerHTML = profiles
-    .map((p) => {
-      const active = p.id === activeId;
-      const initial = ((p.name || "?").trim().charAt(0) || "?").toUpperCase();
-      const sub = active ? "Profil actif" : p.pin ? "🔒 Code requis" : "Toucher pour ouvrir";
-      return `<div class="profile-row ${active ? "active" : ""}" data-id="${p.id}">
-      <span class="avatar">${escapeHtml(initial)}</span>
-      <span class="profile-row-meta"><strong>${escapeHtml(p.name)}</strong><span>${sub}</span></span>
-      <span class="role-badge ${p.role || "user"}">${p.role === "admin" ? "Admin" : "User"}</span>
-    </div>`;
-    })
-    .join("");
-  list.querySelectorAll(".profile-row").forEach((row) => {
-    row.addEventListener("click", () => switchProfile(row.dataset.id));
-  });
-}
-function switchProfile(id) {
-  if (id === activeId) {
-    closeProfileModal();
-    return;
-  }
-  const p = profiles.find((x) => x.id === id);
-  if (!p) return;
-  if (p.pin) {
-    const code = prompt("Code d'accès pour « " + p.name + " » :");
-    if (code === null) return;
-    if (code.trim() !== p.pin) {
-      toast("Code incorrect");
-      return;
-    }
-  }
-  activeId = id;
-  localStorage.setItem(ACTIVE_KEY, activeId);
-  bottles = JSON.parse(localStorage.getItem(bottlesKeyFor(activeId)) || "null") || [];
-  activeFilter = "Toutes";
-  renderProfileChip();
-  render();
-  closeProfileModal();
-  showView("dashboard");
-  toast("Profil : " + p.name);
 }
 function openProfileModal() {
-  renderProfileList();
+  const box = document.querySelector("#profileList");
+  if (box) {
+    const initial = (((ME && ME.name) || "?").trim().charAt(0) || "?").toUpperCase();
+    box.innerHTML =
+      '<div class="profile-row active"><span class="avatar">' +
+      escapeHtml(initial) +
+      '</span><span class="profile-row-meta"><strong>' +
+      escapeHtml((ME && ME.name) || "") +
+      "</strong><span>" +
+      escapeHtml((ME && ME.email) || "") +
+      '</span></span><span class="role-badge ' +
+      (isAdmin() ? "admin" : "user") +
+      '">' +
+      (isAdmin() ? "Admin" : "User") +
+      "</span></div>";
+  }
+  const goto = document.querySelector("#gotoAdminBtn");
+  if (goto) goto.style.display = isAdmin() ? "" : "none";
   document.querySelector("#profileModal").classList.remove("hidden");
 }
 function closeProfileModal() {
   document.querySelector("#profileModal").classList.add("hidden");
+}
+async function logout() {
+  try {
+    await DB.signOut();
+  } catch (e) {}
+  ME = null;
+  bottles = [];
+  closeProfileModal();
+  boot();
 }
 if (document.querySelector("#profileChip"))
   document.querySelector("#profileChip").onclick = () => {
@@ -603,7 +571,8 @@ if (document.querySelector("#closeProfileModal"))
   document.querySelector("#closeProfileModal").onclick = closeProfileModal;
 if (document.querySelector("#profileModal .modal-backdrop"))
   document.querySelector("#profileModal .modal-backdrop").onclick = closeProfileModal;
-/* ---- Administration des comptes ---- */
+if (document.querySelector("#logoutBtn")) document.querySelector("#logoutBtn").onclick = logout;
+/* ---- Administration des comptes (rôles réels, via Supabase) ---- */
 function icon(name) {
   const P = {
     edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
@@ -621,34 +590,34 @@ function icon(name) {
     "</svg>"
   );
 }
-function countFor(id) {
-  try {
-    return (JSON.parse(localStorage.getItem(bottlesKeyFor(id)) || "[]") || []).length;
-  } catch (e) {
-    return 0;
-  }
-}
-function renderAdminView() {
+async function renderAdminView() {
   if (!isAdmin()) return;
   const wrap = document.querySelector("#adminTable");
   if (!wrap) return;
-  const adminCount = profiles.filter((p) => p.role === "admin").length;
-  wrap.innerHTML = profiles
+  wrap.innerHTML = '<div class="empty">Chargement…</div>';
+  let list;
+  try {
+    list = await DB.listProfiles();
+  } catch (err) {
+    wrap.innerHTML = '<div class="empty">Erreur : ' + escapeHtml(err.message || "" + err) + "</div>";
+    return;
+  }
+  const adminCount = list.filter((p) => p.role === "admin").length;
+  wrap.innerHTML = list
     .map((p) => {
-      const me = p.id === activeId;
-      const initial = ((p.name || "?").trim().charAt(0) || "?").toUpperCase();
+      const me = ME && p.id === ME.id;
+      const label = p.name || p.email || "—";
+      const initial = (label.trim().charAt(0) || "?").toUpperCase();
       const lastAdmin = p.role === "admin" && adminCount <= 1;
       return `<div class="admin-acc ${me ? "me" : ""}" data-id="${p.id}">
       <span class="avatar">${escapeHtml(initial)}</span>
       <span class="admin-acc-meta">
-        <span class="nm">${escapeHtml(p.name)}${me ? ' <span class="role-badge admin" style="background:#1b170e">vous</span>' : ""}<span class="role-badge ${p.role}">${p.role === "admin" ? "Admin" : "User"}</span></span>
-        <span class="sb">${p.pin ? "🔒 code actif" : "🔓 sans code"} · ${countFor(p.id)} bouteille(s)</span>
+        <span class="nm">${escapeHtml(label)}${me ? ' <span class="role-badge admin" style="background:#1b170e">vous</span>' : ""}<span class="role-badge ${p.role}">${p.role === "admin" ? "Admin" : "User"}</span></span>
+        <span class="sb">${escapeHtml(p.email || "")}</span>
       </span>
       <span class="admin-acc-actions">
         <button class="mini" data-a="rename" title="Renommer">${icon("edit")}</button>
         <button class="mini" data-a="role" title="${p.role === "admin" ? "Rétrograder en utilisateur" : "Promouvoir administrateur"}" ${lastAdmin ? "disabled" : ""}>${icon(p.role === "admin" ? "down" : "up")}</button>
-        <button class="mini" data-a="pin" title="${p.pin ? "Modifier ou retirer le code" : "Ajouter un code"}">${icon(p.pin ? "lock" : "unlock")}</button>
-        <button class="mini danger-mini" data-a="delete" title="Supprimer le compte" ${profiles.length <= 1 || lastAdmin ? "disabled" : ""}>${icon("trash")}</button>
       </span>
     </div>`;
     })
@@ -657,85 +626,44 @@ function renderAdminView() {
     const id = row.dataset.id;
     row
       .querySelectorAll("[data-a]")
-      .forEach((b) => b.addEventListener("click", () => adminAction(b.dataset.a, id)));
+      .forEach((b) => b.addEventListener("click", () => adminAction(b.dataset.a, id, list)));
   });
 }
-function adminAction(a, id) {
-  const p = profiles.find((x) => x.id === id);
+async function adminAction(a, id, list) {
+  const p = (list || []).find((x) => x.id === id);
   if (!p) return;
-  const adminCount = profiles.filter((x) => x.role === "admin").length;
-  if (a === "rename") {
-    const n = prompt("Nom du compte :", p.name);
-    if (n && n.trim()) {
-      p.name = n.trim();
-      persistProfiles();
+  try {
+    if (a === "rename") {
+      const n = prompt("Nom du compte :", p.name || "");
+      if (n && n.trim()) {
+        await DB.renameProfile(id, n.trim());
+        if (ME && id === ME.id) {
+          ME.name = n.trim();
+          renderProfileChip();
+        }
+        renderAdminView();
+      }
+    } else if (a === "role") {
+      const newRole = p.role === "admin" ? "user" : "admin";
+      if (
+        ME &&
+        id === ME.id &&
+        newRole === "user" &&
+        !confirm("Vous allez retirer VOTRE rôle administrateur. Continuer ?")
+      )
+        return;
+      await DB.setRole(id, newRole);
+      if (ME && id === ME.id) {
+        ME.role = newRole;
+        renderProfileChip();
+      }
+      toast((p.name || p.email) + " : " + (newRole === "admin" ? "administrateur" : "utilisateur"));
       renderAdminView();
-      renderProfileChip();
     }
-  } else if (a === "role") {
-    if (p.role === "admin" && adminCount <= 1) {
-      toast("Au moins un administrateur est requis");
-      return;
-    }
-    p.role = p.role === "admin" ? "user" : "admin";
-    persistProfiles();
-    renderAdminView();
-    renderProfileChip();
-    toast(p.name + " : " + (p.role === "admin" ? "administrateur" : "utilisateur"));
-  } else if (a === "pin") {
-    const code = prompt("Code d'accès pour « " + p.name + " » (laisser vide = aucun) :", "");
-    if (code === null) return;
-    p.pin = code.trim();
-    persistProfiles();
-    renderAdminView();
-    toast(p.pin ? "Code défini" : "Code retiré");
-  } else if (a === "delete") {
-    if (profiles.length <= 1) {
-      toast("Impossible : dernier compte");
-      return;
-    }
-    if (p.role === "admin" && adminCount <= 1) {
-      toast("Impossible : dernier administrateur");
-      return;
-    }
-    if (!confirm("Supprimer le compte « " + p.name + " » et sa cave ? Action définitive.")) return;
-    localStorage.removeItem(bottlesKeyFor(id));
-    profiles = profiles.filter((x) => x.id !== id);
-    persistProfiles();
-    if (activeId === id) {
-      activeId = profiles[0].id;
-      localStorage.setItem(ACTIVE_KEY, activeId);
-      bottles = JSON.parse(localStorage.getItem(bottlesKeyFor(activeId)) || "null") || [];
-      renderProfileChip();
-      render();
-    }
-    renderAdminView();
-    toast("Compte supprimé");
+  } catch (err) {
+    toast("Erreur : " + (err.message || err));
   }
 }
-function adminAddAccount() {
-  if (!isAdmin()) return;
-  const inp = document.querySelector("#adminNewName");
-  const name = (inp.value || "").trim();
-  const role = (document.querySelector("#adminNewRole") || {}).value || "user";
-  if (!name) {
-    toast("Donnez un nom au compte");
-    return;
-  }
-  const id = newId();
-  profiles.push({ id, name, pin: "", role, createdAt: Date.now() });
-  persistProfiles();
-  localStorage.setItem(bottlesKeyFor(id), JSON.stringify([]));
-  inp.value = "";
-  renderAdminView();
-  toast("Compte « " + name + " » créé");
-}
-if (document.querySelector("#adminAddBtn"))
-  document.querySelector("#adminAddBtn").onclick = adminAddAccount;
-if (document.querySelector("#adminNewName"))
-  document.querySelector("#adminNewName").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") adminAddAccount();
-  });
 if (document.querySelector("#gotoAdminBtn"))
   document.querySelector("#gotoAdminBtn").onclick = () => {
     closeProfileModal();
@@ -776,7 +704,113 @@ renderProfileChip();
   });
 })();
 
-render();
+// ==========================================================================
+// CONNEXION (Supabase e-mail + mot de passe)
+// ==========================================================================
+let authMode = "signin"; // "signin" | "signup"
+function showAuth(show) {
+  const gate = document.querySelector("#authGate");
+  if (gate) gate.style.display = show ? "flex" : "none";
+}
+function authError(msg) {
+  const e = document.querySelector("#authError");
+  if (e) {
+    e.textContent = msg || "";
+    e.style.display = msg ? "block" : "none";
+  }
+}
+function bindAuthToggle() {
+  const a = document.querySelector("#authToggle");
+  if (a)
+    a.onclick = (e) => {
+      e.preventDefault();
+      setAuthMode(authMode === "signup" ? "signin" : "signup");
+    };
+}
+function setAuthMode(mode) {
+  authMode = mode;
+  const t = document.querySelector("#authTitle");
+  const sub = document.querySelector("#authSubmit");
+  const sw = document.querySelector("#authSwitch");
+  if (t) t.textContent = mode === "signup" ? "Créer un compte" : "Connexion";
+  if (sub) sub.textContent = mode === "signup" ? "Créer mon compte" : "Se connecter";
+  if (sw)
+    sw.innerHTML =
+      mode === "signup"
+        ? 'Déjà un compte ? <a href="#" id="authToggle">Se connecter</a>'
+        : 'Pas de compte ? <a href="#" id="authToggle">Créer un compte</a>';
+  bindAuthToggle();
+  authError("");
+}
+async function submitAuth() {
+  const email = (document.querySelector("#authEmail").value || "").trim();
+  const pass = document.querySelector("#authPassword").value || "";
+  if (!email || !pass) {
+    authError("Renseignez e-mail et mot de passe.");
+    return;
+  }
+  const btn = document.querySelector("#authSubmit");
+  if (btn) btn.disabled = true;
+  authError("");
+  try {
+    if (authMode === "signup") {
+      const r = await DB.signUp(email, pass);
+      if (r.error) throw r.error;
+      const cu = await DB.currentUser();
+      if (!cu) {
+        setAuthMode("signin");
+        authError("Compte créé. Vérifiez votre e-mail, puis connectez-vous.");
+        return;
+      }
+    } else {
+      const r = await DB.signIn(email, pass);
+      if (r.error) throw r.error;
+    }
+    await boot();
+  } catch (err) {
+    authError(err.message || "" + err);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+(function initAuthUI() {
+  const f = document.querySelector("#authForm");
+  if (f) f.onsubmit = (e) => {
+    e.preventDefault();
+    submitAuth();
+  };
+  setAuthMode("signin");
+})();
+
+// ==========================================================================
+// DÉMARRAGE : connexion requise, puis chargement de la cave depuis Supabase
+// ==========================================================================
+async function boot() {
+  let user = null;
+  try {
+    user = await DB.currentUser();
+  } catch (e) {}
+  ME = user;
+  if (!ME) {
+    showAuth(true);
+    return;
+  }
+  showAuth(false);
+  renderProfileChip();
+  showView("dashboard");
+  try {
+    bottles = await DB.listBottles();
+  } catch (err) {
+    bottles = [];
+    toast("Erreur de chargement : " + (err.message || err));
+  }
+  render();
+}
+if (window.DB) {
+  boot();
+} else {
+  console.error("[Le Bar] db.js non chargé — vérifiez les balises <script>.");
+}
 
 // ==========================================================================
 // PWA : enregistrement du service worker (cache hors-ligne, si servi en http/https)
