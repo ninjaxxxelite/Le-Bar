@@ -414,58 +414,91 @@ if (_scanInput)
     e.target.value = "";
   };
 
+const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash";
+const SCAN_PROMPT =
+  'Analyse cette étiquette de bouteille (vin, spiritueux ou liqueur). Réponds UNIQUEMENT par un objet JSON, sans texte ni balises autour, avec les clés: name, producer, type (une valeur EXACTE parmi "Vin rouge","Vin blanc","Vin rosé","Vin effervescent","Liqueur","Spiritueux"), grape (cépage ou matière première, ex "Pinot Noir","Rhum"; "" si inconnu), vintage (année en nombre, ou null), region (région ou pays; "" si inconnu). N\'invente pas de prix.';
+
+// Google Gemini (offre gratuite) — renvoie le texte brut du modèle
+async function callGemini(dataUrl) {
+  const b64 = dataUrl.split(",")[1];
+  const media = dataUrl.substring(5, dataUrl.indexOf(";"));
+  const model = settings.geminiModel || DEFAULT_GEMINI_MODEL;
+  const res = await fetch(
+    "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": settings.geminiKey },
+      body: JSON.stringify({
+        contents: [{ parts: [{ inlineData: { mimeType: media, data: b64 } }, { text: SCAN_PROMPT }] }],
+        generationConfig: { responseMimeType: "application/json", temperature: 0 },
+      }),
+    },
+  );
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error("Gemini " + res.status + " — " + t.slice(0, 160));
+  }
+  const data = await res.json();
+  const cand = (data.candidates || [])[0] || {};
+  const parts = (cand.content && cand.content.parts) || [];
+  return parts.map((p) => p.text || "").join("");
+}
+
+// Anthropic Claude — renvoie le texte brut du modèle
+async function callAnthropic(dataUrl) {
+  const b64 = dataUrl.split(",")[1];
+  const media = dataUrl.substring(5, dataUrl.indexOf(";"));
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": settings.apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify({
+      model: settings.model || DEFAULT_MODEL,
+      max_tokens: 500,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: media, data: b64 } },
+            { type: "text", text: SCAN_PROMPT },
+          ],
+        },
+      ],
+    }),
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error("Claude " + res.status + " — " + t.slice(0, 160));
+  }
+  const data = await res.json();
+  return (data.content || [])
+    .filter((c) => c.type === "text")
+    .map((c) => c.text)
+    .join("");
+}
+
 async function scanLabel(file) {
   const status = document.querySelector("#scanStatus");
   compressImage(file, 1100, async (dataUrl) => {
     photoData = dataUrl;
     document.querySelector("#photoPreview").innerHTML = `<img src="${dataUrl}" alt="">`;
-    if (!settings.apiKey) {
+    const provider = settings.provider || "gemini";
+    const hasKey = provider === "gemini" ? !!settings.geminiKey : !!settings.apiKey;
+    if (!hasKey) {
       status.className = "scan-status error";
       status.innerHTML =
-        "Clé API manquante. Ajoutez-la dans <b>Paramètres &rsaquo; Remplissage automatique</b>.";
+        "Clé IA manquante. Ajoutez-la dans <b>Paramètres &rsaquo; Remplissage automatique</b>.";
       return;
     }
     status.className = "scan-status";
     status.innerHTML = '<span class="spin"></span>Lecture de l\'étiquette…';
     try {
-      const b64 = dataUrl.split(",")[1];
-      const media = dataUrl.substring(5, dataUrl.indexOf(";"));
-      const prompt =
-        'Analyse cette étiquette de bouteille (vin, spiritueux ou liqueur). Réponds UNIQUEMENT par un objet JSON, sans texte ni balises autour, avec les clés: name, producer, type (une valeur EXACTE parmi "Vin rouge","Vin blanc","Vin rosé","Vin effervescent","Liqueur","Spiritueux"), grape (cépage ou matière première, ex "Pinot Noir","Rhum"; "" si inconnu), vintage (année en nombre, ou null), region (région ou pays; "" si inconnu). N\'invente pas de prix.';
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-api-key": settings.apiKey,
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true",
-        },
-        body: JSON.stringify({
-          model: settings.model || DEFAULT_MODEL,
-          max_tokens: 500,
-          messages: [
-            {
-              role: "user",
-              content: [
-                { type: "image", source: { type: "base64", media_type: media, data: b64 } },
-                { type: "text", text: prompt },
-              ],
-            },
-          ],
-        }),
-      });
-      if (!res.ok) {
-        const t = await res.text();
-        throw new Error("API " + res.status + " — " + t.slice(0, 140));
-      }
-      const data = await res.json();
-      let text = (data.content || [])
-        .filter((c) => c.type === "text")
-        .map((c) => c.text)
-        .join("")
-        .trim()
-        .replace(/```json|```/g, "")
-        .trim();
+      let text = provider === "gemini" ? await callGemini(dataUrl) : await callAnthropic(dataUrl);
+      text = (text || "").trim().replace(/```json|```/g, "").trim();
       const info = JSON.parse(text);
       const form = document.querySelector("#bottleForm");
       const put = (k, v) => {
@@ -489,26 +522,40 @@ async function scanLabel(file) {
 }
 
 /* ================= Réglages IA ================= */
+function toggleAiFields() {
+  const provider =
+    (document.querySelector("#aiProvider") || {}).value || settings.provider || "gemini";
+  const g = document.querySelector("#geminiFields"),
+    a = document.querySelector("#anthropicFields");
+  if (g) g.style.display = provider === "gemini" ? "" : "none";
+  if (a) a.style.display = provider === "anthropic" ? "" : "none";
+}
 function loadSettingsUI() {
-  const k = document.querySelector("#apiKeyInput"),
+  const prov = document.querySelector("#aiProvider");
+  if (prov) prov.value = settings.provider || "gemini";
+  const gk = document.querySelector("#geminiKeyInput"),
+    gm = document.querySelector("#geminiModelInput"),
+    k = document.querySelector("#apiKeyInput"),
     m = document.querySelector("#apiModelInput");
+  if (gk) gk.value = settings.geminiKey || "";
+  if (gm) gm.value = settings.geminiModel || DEFAULT_GEMINI_MODEL;
   if (k) k.value = settings.apiKey || "";
   if (m) m.value = settings.model || DEFAULT_MODEL;
+  toggleAiFields();
 }
+if (document.querySelector("#aiProvider"))
+  document.querySelector("#aiProvider").addEventListener("change", toggleAiFields);
 if (document.querySelector("#saveKeyBtn"))
   document.querySelector("#saveKeyBtn").onclick = () => {
+    const prov = document.querySelector("#aiProvider");
+    settings.provider = (prov && prov.value) || "gemini";
+    settings.geminiKey = (document.querySelector("#geminiKeyInput").value || "").trim();
+    settings.geminiModel =
+      (document.querySelector("#geminiModelInput").value || "").trim() || DEFAULT_GEMINI_MODEL;
     settings.apiKey = (document.querySelector("#apiKeyInput").value || "").trim();
     settings.model = (document.querySelector("#apiModelInput").value || "").trim() || DEFAULT_MODEL;
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
     toast("Réglages enregistrés");
-  };
-if (document.querySelector("#clearKeyBtn"))
-  document.querySelector("#clearKeyBtn").onclick = () => {
-    settings.apiKey = "";
-    const k = document.querySelector("#apiKeyInput");
-    if (k) k.value = "";
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-    toast("Clé effacée");
   };
 loadSettingsUI();
 
