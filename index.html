@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0d0e0e">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Le Bar">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <title>Le Bar — Ma collection</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Barre latérale : logo, profil, navigation, sauvegarde -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">🍷</div>
+      <div><strong>LE BAR</strong><span>Ma collection</span></div>
+    </div>
+    <button class="profile-chip" id="profileChip" aria-label="Changer de profil">
+      <span class="avatar" id="profileAvatar">M</span>
+      <span class="profile-meta"><strong id="profileName">Moi</strong><span id="profileRole">Changer de profil</span></span>
+    </button>
+    <nav>
+      <button class="nav-item active" data-view="dashboard">⌂ <span>Tableau de bord</span></button>
+      <button class="nav-item" data-view="cellar">▣ <span>Ma cave</span></button>
+      <button class="nav-item" data-view="favorites">★ <span>Favoris</span></button>
+      <button class="nav-item" data-view="settings">⚙ <span>Paramètres</span></button>
+      <button class="nav-item" data-view="admin" id="navAdmin" style="display:none">⚑ <span>Administration</span></button>
+    </nav>
+    <div class="sidebar-bottom">
+      <button class="secondary full" id="exportBtn">↓ Sauvegarder</button>
+      <label class="secondary full import-label">↑ Restaurer
+        <input type="file" id="importFile" accept=".json" hidden>
+      </label>
+      <small>Version 1.0 • locale</small>
+    </div>
+  </aside>
+  <div class="sidebar-scrim" id="sidebarScrim"></div>
+
+  <!-- Zone principale -->
+  <main class="main">
+    <header class="topbar">
+      <button class="menu-toggle" id="menuToggle" aria-label="Ouvrir le menu">☰</button>
+      <div class="topbar-title">
+        <p class="eyebrow">COLLECTION PRIVÉE</p>
+        <h1 id="pageTitle">Tableau de bord</h1>
+      </div>
+      <button class="primary" id="addBtn">＋ Ajouter une bouteille</button>
+    </header>
+
+    <!-- Vue : Tableau de bord -->
+    <section id="dashboardView" class="view">
+      <div class="hero">
+        <div>
+          <p class="eyebrow">BIENVENUE DANS</p>
+          <h2>Votre cave,<br><em>votre collection.</em></h2>
+          <p class="hero-text">Gardez une trace de vos bouteilles, de leur valeur et de leurs meilleurs moments de dégustation.</p>
+        </div>
+        <div class="hero-bottle">🍾</div>
+      </div>
+
+      <div class="stats" id="stats"></div>
+
+      <div class="section-head">
+        <div><p class="eyebrow">COLLECTION</p><h2>Dernières bouteilles</h2></div>
+        <button class="text-btn" data-view-target="cellar">Voir toute la cave →</button>
+      </div>
+      <div id="recentGrid" class="bottle-grid"></div>
+    </section>
+
+    <!-- Vue : Ma cave (recherche, filtres, grille) -->
+    <section id="cellarView" class="view hidden">
+      <div class="toolbar">
+        <div class="search"><span>⌕</span><input id="searchInput" placeholder="Rechercher une bouteille, domaine, région..."></div>
+        <select id="sortSelect">
+          <option value="recent">Plus récentes</option>
+          <option value="name">Nom A → Z</option>
+          <option value="priceDesc">Valeur décroissante</option>
+          <option value="vintage">Millésime</option>
+        </select>
+      </div>
+      <div class="filters" id="filters"></div>
+      <div id="cellarGrid" class="bottle-grid"></div>
+    </section>
+
+    <!-- Vue : Favoris -->
+    <section id="favoritesView" class="view hidden">
+      <div class="section-head"><div><p class="eyebrow">SÉLECTION</p><h2>Mes favoris</h2></div></div>
+      <div id="favoritesGrid" class="bottle-grid"></div>
+    </section>
+
+    <!-- Vue : Paramètres (sauvegarde, remplissage auto) -->
+    <section id="settingsView" class="view hidden">
+      <div class="settings-card">
+        <p class="eyebrow">DONNÉES</p>
+        <h2>Sauvegarde de la cave</h2>
+        <p>La version actuelle conserve vos données directement dans le navigateur de cet ordinateur.</p>
+        <div class="settings-actions">
+          <button class="primary" id="exportBtn2">Exporter ma cave</button>
+          <label class="secondary import-label">Importer une sauvegarde
+            <input type="file" id="importFile2" accept=".json" hidden>
+          </label>
+        </div>
+        <div class="future-box">
+          <span>☁</span><div><strong>OneDrive</strong><p>Prévu pour la prochaine étape : synchronisation PC ↔ téléphone.</p></div>
+        </div>
+      </div>
+
+      <div class="settings-card" style="margin-top:20px">
+        <p class="eyebrow">INTELLIGENCE</p>
+        <h2>Remplissage automatique</h2>
+        <p>Photographiez l'étiquette : le nom, le producteur, le millésime, la région et le cépage se remplissent tout seuls. Nécessite une clé API Anthropic, conservée uniquement sur cet appareil.</p>
+        <label style="display:grid;gap:7px;color:#bcb9b1;font-size:11px;margin-bottom:12px;max-width:520px">Clé API Anthropic
+          <input type="password" id="apiKeyInput" placeholder="sk-ant-..." autocomplete="off">
+        </label>
+        <label style="display:grid;gap:7px;color:#bcb9b1;font-size:11px;max-width:320px">Modèle
+          <input type="text" id="apiModelInput" placeholder="claude-sonnet-5">
+        </label>
+        <div class="settings-actions">
+          <button class="primary" id="saveKeyBtn">Enregistrer</button>
+          <button class="secondary" id="clearKeyBtn">Effacer la clé</button>
+        </div>
+        <div class="future-box">
+          <span>🔒</span><div><strong>Confidentialité</strong><p>La clé reste sur cet appareil (stockage local du navigateur). Pour une app distribuée à d'autres, passez plutôt par un petit serveur qui garde la clé côté serveur.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Vue : Administration des comptes -->
+    <section id="adminView" class="view hidden">
+      <div class="settings-card" style="max-width:900px">
+        <p class="eyebrow">COMPTES</p>
+        <h2>Gestion des comptes</h2>
+        <p style="color:var(--muted);line-height:1.6;margin:6px 0 0">Créez et administrez les comptes. Un nouveau compte est <strong>utilisateur</strong> par défaut ; vous pouvez le promouvoir administrateur. Chaque compte possède sa propre cave.</p>
+        <div class="admin-add">
+          <input id="adminNewName" placeholder="Nom du nouveau compte" maxlength="24">
+          <select id="adminNewRole">
+            <option value="user">Utilisateur</option>
+            <option value="admin">Administrateur</option>
+          </select>
+          <button class="primary" id="adminAddBtn">Créer le compte</button>
+        </div>
+        <div class="admin-table" id="adminTable"></div>
+        <div class="future-box" style="margin-top:22px">
+          <span>🔒</span><div><strong>Portée de l'administration</strong><p>Les rôles et les codes sont gérés dans l'application, sur cet appareil. Pour une gouvernance réellement inviolable, il faudra un serveur avec authentification — prévu à l'étape en ligne.</p></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Modale : ajout / édition de bouteille -->
+  <div class="modal hidden" id="modal">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card">
+      <button class="close" id="closeModal">×</button>
+      <p class="eyebrow">NOUVELLE BOUTEILLE</p>
+      <h2 id="modalTitle">Ajouter à ma cave</h2>
+
+      <form id="bottleForm">
+        <div class="photo-row">
+          <div class="photo-preview" id="photoPreview">🍷</div>
+          <div>
+            <strong>Photo de la bouteille</strong>
+            <p>Ajoutez une photo, ou remplissez la fiche depuis l'étiquette.</p>
+            <div class="photo-buttons">
+              <label class="primary scan-btn" id="scanLabel">✨ Remplir depuis l'étiquette
+                <input type="file" id="scanInput" accept="image/*" hidden>
+              </label>
+              <label class="secondary">📷 Choisir une photo
+                <input type="file" id="photoInput" accept="image/*" hidden>
+              </label>
+            </div>
+            <div class="scan-status" id="scanStatus"></div>
+          </div>
+        </div>
+
+        <div class="form-grid">
+          <label>Nom de la bouteille<input name="name" required placeholder="Ex. Château Margaux"></label>
+          <label>Domaine / producteur<input name="producer" placeholder="Ex. Château Margaux"></label>
+          <label>Type
+            <select name="type">
+              <option>Vin rouge</option><option>Vin blanc</option><option>Vin rosé</option>
+              <option>Vin effervescent</option><option>Liqueur</option><option>Spiritueux</option>
+            </select>
+          </label>
+          <label>Cépage / style<input name="grape" placeholder="Ex. Pinot Noir"></label>
+          <label>Millésime<input name="vintage" type="number" min="1900" max="2100" placeholder="2020"></label>
+          <label>Région<input name="region" placeholder="Bordeaux, Bourgogne..."></label>
+          <label>Quantité<input name="quantity" type="number" min="1" value="1"></label>
+          <label>Prix d'achat (€)<input name="purchasePrice" type="number" min="0" step="0.01" value="0"></label>
+          <label>Valeur actuelle (€)<input name="currentValue" type="number" min="0" step="0.01" value="0"></label>
+          <label>Emplacement<input name="location" placeholder="Étagère 2 / Case B04"></label>
+          <label>Note personnelle
+            <select name="rating"><option value="0">Pas encore noté</option><option value="1">★</option><option value="2">★★</option><option value="3">★★★</option><option value="4">★★★★</option><option value="5">★★★★★</option></select>
+          </label>
+          <label>Date d'achat<input name="purchaseDate" type="date"></label>
+        </div>
+        <label>Commentaire<textarea name="notes" rows="3" placeholder="Notes personnelles, occasion, accord mets-vin..."></textarea></label>
+
+        <div class="form-actions">
+          <button type="button" class="danger hidden" id="deleteBtn">Supprimer</button>
+          <div></div>
+          <button type="button" class="secondary" id="cancelBtn">Annuler</button>
+          <button class="primary" type="submit">Enregistrer</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modale : sélection de profil -->
+  <div class="modal hidden" id="profileModal">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card profile-modal-card">
+      <button class="close" id="closeProfileModal">×</button>
+      <p class="eyebrow">COMPTES</p>
+      <h2>Changer de profil</h2>
+      <p class="profile-help">Chaque profil possède sa propre cave. Touchez un profil pour l'ouvrir (un code peut être demandé). La création et la gestion des comptes se font dans l'Administration.</p>
+      <div id="profileList" class="profile-list"></div>
+      <button class="secondary full" id="gotoAdminBtn" style="display:none">⚑ Gérer les comptes</button>
+    </div>
+  </div>
+
+  <!-- Notification (toast) -->
+  <div class="toast" id="toast"></div>
+  <script src="app.js"></script>
+</body>
+</html>

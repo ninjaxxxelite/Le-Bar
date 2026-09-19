@@ -1,0 +1,31 @@
+LE BAR — Projet séparé (HTML / CSS / JS)
+========================================
+
+STRUCTURE
+  index.html            Structure de la page
+  style.css             Styles (thème, mise en page, responsive)
+  app.js                Logique de l'application (+ enregistrement du service worker)
+  sw.js                 Service worker (cache hors-ligne)
+  manifest.webmanifest  Manifest PWA (nom, couleurs, icônes)
+  icon-192.png          Icône 192x192
+  icon-512.png          Icône 512x512 (maskable)
+  icon-180.png          Icône Apple (écran d'accueil iOS)
+
+IMPORTANT : garder tous ces fichiers DANS LE MÊME DOSSIER.
+
+USAGE LOCAL (PC)
+  Ouvrir index.html dans le navigateur. Tout fonctionne, SAUF
+  l'installation/hors-ligne PWA (impossible en file:// — voir ci-dessous).
+
+METTRE EN LIGNE (installation + hors-ligne)
+  Héberger le dossier en HTTPS. Le plus simple, gratuit :
+   1. https://app.netlify.com/drop
+   2. Glisser-déposer ce dossier complet
+   3. Ouvrir le lien https:// sur le téléphone, puis
+      "Installer l'application" (Android) / "Sur l'écran d'accueil" (iPhone).
+
+NOTES
+  - Le remplissage automatique par IA nécessite une clé API Anthropic
+    (Paramètres) et une connexion Internet.
+  - Les données restent locales à chaque appareil (sauvegarde via
+    export/import JSON). La synchro entre appareils = étape "comptes en ligne".
