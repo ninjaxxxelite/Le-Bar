@@ -134,3 +134,18 @@ create policy photos_delete on storage.objects
 -- 8) DEVENIR ADMIN (à exécuter UNE FOIS, après votre inscription) -------
 --    Remplacez l'email, puis lancez cette ligne :
 -- update public.profiles set role = 'admin' where email = 'VOTRE_EMAIL';
+
+-- 9) RÉGLAGES PRIVÉS PAR UTILISATEUR (clé Gemini) -----------------------
+-- Table verrouillée sur le profil : lisible et modifiable par le SEUL
+-- propriétaire (aucun accès admin) -> la clé API reste privée, et suit le
+-- compte sur tous les appareils.
+create table if not exists public.user_settings (
+  id           uuid primary key references auth.users(id) on delete cascade,
+  gemini_key   text,
+  gemini_model text,
+  updated_at   timestamptz not null default now()
+);
+alter table public.user_settings enable row level security;
+drop policy if exists user_settings_rw on public.user_settings;
+create policy user_settings_rw on public.user_settings
+  for all using (id = auth.uid()) with check (id = auth.uid());

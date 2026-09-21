@@ -112,6 +112,24 @@
     renameProfile: async function (userId, name) {
       var r = await sb.from("profiles").update({ name: name }).eq("id", userId);
       if (r.error) throw r.error;
+    },
+
+    // ---- Lecture d'étiquette via Edge Function (clé Gemini côté serveur) ----
+    scanLabel: async function (base64, mimeType) {
+      var r = await sb.functions.invoke("scan-label", {
+        body: { image: base64, mimeType: mimeType },
+      });
+      if (r.error) {
+        var msg = r.error.message || "Fonction indisponible";
+        try {
+          if (r.error.context && typeof r.error.context.json === "function") {
+            var j = await r.error.context.json();
+            if (j && j.error) msg = j.error;
+          }
+        } catch (e) {}
+        throw new Error(msg);
+      }
+      return r.data; // { info: {...} }
     }
   };
 

@@ -1139,3 +1139,11 @@ textarea {
 }
 .auth-switch { text-align: center; color: var(--muted); font-size: 13px; margin: 2px 0 0; }
 .auth-switch a { color: var(--gold); }
+
+/* Champs en lecture seule (réglage géré côté serveur) */
+input:disabled,
+textarea:disabled,
+select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

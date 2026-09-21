@@ -112,35 +112,16 @@
 
       <div class="settings-card" style="margin-top:20px">
         <p class="eyebrow">INTELLIGENCE</p>
-        <h2>Remplissage automatique</h2>
-        <p>Photographiez l'étiquette : le nom, le producteur, le millésime, la région et le cépage se remplissent tout seuls. La clé reste sur cet appareil.</p>
-        <label style="display:grid;gap:7px;color:#bcb9b1;font-size:11px;margin-bottom:14px;max-width:320px">Service d'IA
-          <select id="aiProvider">
-            <option value="gemini">Google Gemini (gratuit)</option>
-            <option value="anthropic">Anthropic Claude</option>
-          </select>
+        <h2>Remplissage automatique (Gemini)</h2>
+        <p>Photographiez l'étiquette : les champs se remplissent tout seuls, via Google Gemini. Ce service est <strong>fourni et géré par l'administrateur</strong> — rien à configurer de votre côté.</p>
+        <label style="display:grid;gap:7px;color:#6f6a60;font-size:11px;margin-bottom:12px;max-width:520px">Clé API Gemini
+          <input type="password" id="geminiKeyInput" value="config-serveur" disabled>
         </label>
-        <div id="geminiFields">
-          <label style="display:grid;gap:7px;color:#bcb9b1;font-size:11px;margin-bottom:12px;max-width:520px">Clé API Gemini <span style="color:#7f7a70">— gratuite sur aistudio.google.com → « Get API key »</span>
-            <input type="password" id="geminiKeyInput" placeholder="AIza..." autocomplete="off">
-          </label>
-          <label style="display:grid;gap:7px;color:#bcb9b1;font-size:11px;max-width:320px">Modèle Gemini
-            <input type="text" id="geminiModelInput" placeholder="gemini-3.8-flash">
-          </label>
-        </div>
-        <div id="anthropicFields" style="display:none">
-          <label style="display:grid;gap:7px;color:#bcb9b1;font-size:11px;margin-bottom:12px;max-width:520px">Clé API Anthropic
-            <input type="password" id="apiKeyInput" placeholder="sk-ant-..." autocomplete="off">
-          </label>
-          <label style="display:grid;gap:7px;color:#bcb9b1;font-size:11px;max-width:320px">Modèle Claude
-            <input type="text" id="apiModelInput" placeholder="claude-sonnet-5">
-          </label>
-        </div>
-        <div class="settings-actions">
-          <button class="primary" id="saveKeyBtn">Enregistrer</button>
-        </div>
-        <div class="future-box">
-          <span>🔒</span><div><strong>Confidentialité</strong><p>La clé est stockée dans le navigateur de cet appareil (elle n'est pas envoyée sur GitHub). Chaque personne renseigne la sienne dans ses Paramètres.</p></div>
+        <label style="display:grid;gap:7px;color:#6f6a60;font-size:11px;max-width:320px">Modèle Gemini
+          <input type="text" id="geminiModelInput" value="géré côté serveur" disabled>
+        </label>
+        <div class="future-box" style="margin-top:16px">
+          <span>🔒</span><div><strong>Clé protégée côté serveur</strong><p>La clé Gemini n'est jamais exposée : elle est stockée en secret dans une fonction serveur. Ce réglage est en lecture seule et commun à tous les utilisateurs.</p></div>
         </div>
       </div>
     </section>
