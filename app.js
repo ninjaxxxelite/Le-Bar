@@ -230,6 +230,11 @@ function openModal(id = null) {
     if (photoData) $("#photoPreview").innerHTML = `<img src="${photoData}" alt="">`;
   }
   $("#modal").classList.remove("hidden");
+  // Toujours ouvrir la fiche en haut (sur la photo), pas au niveau des boutons
+  requestAnimationFrame(() => {
+    const mc = document.querySelector("#modal .modal-card");
+    if (mc) mc.scrollTop = 0;
+  });
 }
 function closeModal() {
   $("#modal").classList.add("hidden");
