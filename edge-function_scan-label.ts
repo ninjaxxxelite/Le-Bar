@@ -1,16 +1,11 @@
 // =====================================================================
-// LE BAR — Edge Function "scan-label"
-// Garde la clé Gemini SECRÈTE côté serveur. Les utilisateurs connectés
-// envoient une image ; la fonction interroge Gemini et renvoie les champs.
+// LE BAR — Edge Function "scan-label" (version anti-503)
+// Garde la clé Gemini SECRÈTE côté serveur. Réessais automatiques sur
+// 429/503 + bascule sur un modèle de secours si le principal est saturé.
 //
-// Déploiement (sans CLI) :
-//   Dashboard Supabase > Edge Functions > "Deploy a new function" > "Via Editor"
-//   - Nom de la fonction : scan-label
-//   - Collez ce code, puis "Deploy".
-// Secret à définir (Dashboard > Edge Functions > Secrets, ou Project Settings) :
-//   GEMINI_API_KEY = votre clé Google AI Studio
-//   (facultatif) GEMINI_MODEL = gemini-3.8-flash
-// SUPABASE_URL et SUPABASE_ANON_KEY sont fournis automatiquement.
+// Déploiement : Dashboard > Edge Functions > scan-label > coller > Deploy.
+// Secrets : GEMINI_API_KEY (obligatoire), GEMINI_MODEL (facultatif),
+//           GEMINI_MODEL_FALLBACK (facultatif).
 // =====================================================================
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -35,12 +30,42 @@ const PROMPT =
   'grape (cépage ou matière première, ex "Pinot Noir","Rhum"; "" si inconnu), ' +
   "vintage (année en nombre, ou null), region (région ou pays; \"\" si inconnu). N'invente pas de prix.";
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Appelle un modèle Gemini avec réessais sur erreurs transitoires (429/5xx)
+async function generate(model: string, key: string, image: string, mimeType: string) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+  const payload = {
+    contents: [{ parts: [{ inlineData: { mimeType, data: image } }, { text: PROMPT }] }],
+    generationConfig: { responseMimeType: "application/json", temperature: 0 },
+  };
+  const MAX = 3;
+  let lastErr = "";
+  for (let i = 0; i < MAX; i++) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) return await res.json();
+    lastErr = `Gemini ${res.status} — ${(await res.text()).slice(0, 200)}`;
+    // 429 (quota) ou 5xx (surcharge) => transitoire : on réessaie après une pause
+    if (res.status === 429 || res.status >= 500) {
+      await sleep(700 * (i + 1));
+      continue;
+    }
+    // Erreur non transitoire (clé invalide, requête malformée…) : inutile d'insister
+    throw new Error(lastErr);
+  }
+  throw new Error(lastErr);
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "Méthode non autorisée" }, 405);
 
   try {
-    // 1) Vérifier que l'appelant est un utilisateur connecté
+    // 1) Utilisateur connecté requis
     const authHeader = req.headers.get("Authorization") ?? "";
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
@@ -52,41 +77,38 @@ Deno.serve(async (req) => {
     } = await supabase.auth.getUser();
     if (!user) return json({ error: "Non authentifié" }, 401);
 
-    // 2) Image reçue
+    // 2) Image
     const { image, mimeType } = await req.json();
     if (!image) return json({ error: "Image manquante" }, 400);
 
-    // 3) Clé Gemini (secret serveur)
+    // 3) Clé + modèles (principal puis secours)
     const key = Deno.env.get("GEMINI_API_KEY");
     if (!key) return json({ error: "Secret GEMINI_API_KEY non configuré" }, 500);
-    const model = Deno.env.get("GEMINI_MODEL") ?? "gemini-3.8-flash";
+    const primary = Deno.env.get("GEMINI_MODEL") ?? "gemini-3.8-flash";
+    const fallback = Deno.env.get("GEMINI_MODEL_FALLBACK") ?? "gemini-3.5-flash-lite";
+    const models = [...new Set([primary, fallback])];
 
-    // 4) Appel Gemini
-    const gRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                { inlineData: { mimeType: mimeType ?? "image/jpeg", data: image } },
-                { text: PROMPT },
-              ],
-            },
-          ],
-          generationConfig: { responseMimeType: "application/json", temperature: 0 },
-        }),
-      },
-    );
-    if (!gRes.ok) {
-      const t = await gRes.text();
-      return json({ error: `Gemini ${gRes.status} — ${t.slice(0, 200)}` }, 502);
+    // 4) On tente chaque modèle (avec réessais) jusqu'à en obtenir un qui répond
+    let gData: any = null;
+    let lastError = "";
+    for (const model of models) {
+      try {
+        gData = await generate(model, key, image, mimeType ?? "image/jpeg");
+        break;
+      } catch (e) {
+        lastError = String(e);
+      }
     }
-    const gData = await gRes.json();
+    if (!gData) {
+      return json(
+        { error: lastError || "Service momentanément indisponible, réessayez." },
+        503,
+      );
+    }
+
+    // 5) Extraction du JSON
     const parts = gData?.candidates?.[0]?.content?.parts ?? [];
-    let text = parts
+    const text = parts
       .map((p: { text?: string }) => p.text ?? "")
       .join("")
       .trim()

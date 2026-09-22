@@ -46,7 +46,7 @@ function categoryIcon(type) {
   return "🥃";
 }
 function card(b) {
-  const img = b.photo ? `<img src="${b.photo}" alt="">` : categoryIcon(b.type);
+  const img = categoryIcon(b.type); // grille : pictogramme ; la photo s'affiche dans la fiche ouverte
   return `<article class="bottle-card" data-id="${b.id}">
     <div class="bottle-image">${img}</div>
     <button class="favorite ${b.favorite ? "on" : ""}" title="Favori">${b.favorite ? "★" : "☆"}</button>

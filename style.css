@@ -671,6 +671,23 @@ textarea {
   }
 }
 @media (max-width: 600px) {
+  /* Boutons du formulaire : plein écran, "Supprimer" entier dans la carte */
+  .form-actions {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .form-actions > div {
+    display: none;
+  }
+  .form-actions .secondary,
+  .form-actions .primary {
+    flex: 1;
+  }
+  .form-actions .danger {
+    order: 3;
+    width: 100%;
+    margin: 0;
+  }
   .topbar {
     align-items: center;
     gap: 10px;
