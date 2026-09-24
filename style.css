@@ -1164,3 +1164,15 @@ select:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
+
+/* Ligne d'estimation de valeur (IA) */
+.estimate-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 4px 0 14px;
+}
+.estimate-row .scan-status {
+  margin: 0;
+}

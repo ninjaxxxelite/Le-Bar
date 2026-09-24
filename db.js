@@ -73,8 +73,14 @@
     saveBottle: async function (b) {
       var row = toRow(b);
       var r;
-      if (row.id) r = await sb.from("bottles").update(row).eq("id", row.id).select().single();
-      else        r = await sb.from("bottles").insert(row).select().single();
+      if (row.id) {
+        r = await sb.from("bottles").update(row).eq("id", row.id).select().single();
+      } else {
+        // Garantir le propriétaire (sinon la ligne est filtrée par la sécurité à la lecture)
+        var u = await sb.auth.getUser();
+        if (u.data && u.data.user) row.owner = u.data.user.id;
+        r = await sb.from("bottles").insert(row).select().single();
+      }
       if (r.error) throw r.error;
       return fromRow(r.data);
     },
@@ -130,6 +136,22 @@
         throw new Error(msg);
       }
       return r.data; // { info: {...} }
+    },
+
+    // ---- Estimation de valeur (IA) via Edge Function ----
+    estimateValue: async function (fields) {
+      var r = await sb.functions.invoke("estimate-value", { body: fields });
+      if (r.error) {
+        var msg = r.error.message || "Fonction indisponible";
+        try {
+          if (r.error.context && typeof r.error.context.json === "function") {
+            var j = await r.error.context.json();
+            if (j && j.error) msg = j.error;
+          }
+        } catch (e) {}
+        throw new Error(msg);
+      }
+      return r.data; // { value, low, high, confidence }
     }
   };
 

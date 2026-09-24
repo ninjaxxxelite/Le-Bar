@@ -217,6 +217,11 @@ function openModal(id = null) {
     _ss.textContent = "";
     _ss.className = "scan-status";
   }
+  const _es = document.querySelector("#estimateStatus");
+  if (_es) {
+    _es.textContent = "";
+    _es.className = "scan-status";
+  }
   $("#deleteBtn").classList.toggle("hidden", !id);
   $("#modalTitle").textContent = id ? "Modifier la bouteille" : "Ajouter à ma cave";
   if (id) {
@@ -324,6 +329,46 @@ $("#deleteBtn").onclick = async () => {
 };
 $("#searchInput").oninput = renderCellar;
 $("#sortSelect").onchange = renderCellar;
+
+// Estimation de la valeur par IA (indicative) — remplit le champ "Valeur actuelle"
+if ($("#estimateBtn"))
+  $("#estimateBtn").onclick = async () => {
+    const form = $("#bottleForm");
+    const fields = {
+      name: (form.elements.name.value || "").trim(),
+      producer: (form.elements.producer.value || "").trim(),
+      vintage: (form.elements.vintage.value || "").trim(),
+      region: (form.elements.region.value || "").trim(),
+      type: form.elements.type.value || "",
+      grape: (form.elements.grape.value || "").trim(),
+    };
+    const st = $("#estimateStatus");
+    if (!fields.name) {
+      st.className = "scan-status error";
+      st.textContent = "Renseignez au moins le nom de la bouteille.";
+      return;
+    }
+    const btn = $("#estimateBtn");
+    btn.disabled = true;
+    st.className = "scan-status";
+    st.innerHTML = '<span class="spin"></span>Estimation…';
+    try {
+      const res = await DB.estimateValue(fields);
+      const v = res && res.value;
+      if (v === null || v === undefined || isNaN(Number(v)))
+        throw new Error("valeur indisponible");
+      form.elements.currentValue.value = Number(v).toFixed(2);
+      const range =
+        res.low && res.high ? ` (fourchette ${Math.round(res.low)}–${Math.round(res.high)} €)` : "";
+      st.className = "scan-status ok";
+      st.textContent = "Estimation indicative : " + Math.round(Number(v)) + " €" + range;
+    } catch (err) {
+      st.className = "scan-status error";
+      st.textContent = "Estimation impossible (" + (err.message || err) + ").";
+    } finally {
+      btn.disabled = false;
+    }
+  };
 
 // ==========================================================================
 // SAUVEGARDE & RESTAURATION
