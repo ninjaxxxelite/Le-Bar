@@ -47,6 +47,15 @@ function categoryIcon(type) {
 }
 function card(b) {
   const img = categoryIcon(b.type); // grille : pictogramme ; la photo s'affiche dans la fiche ouverte
+  const delta = b.currentValue && b.purchasePrice ? b.currentValue - b.purchasePrice : null;
+  const deltaHtml =
+    delta !== null && Math.round(delta) !== 0
+      ? `<span class="delta ${delta > 0 ? "up" : "down"}">${delta > 0 ? "+" : "−"}${euro(Math.abs(delta))}</span>`
+      : "";
+  const valuesLine =
+    b.purchasePrice || deltaHtml
+      ? `<div class="card-values">${b.purchasePrice ? `<span class="buy">Achat ${euro(b.purchasePrice)}</span>` : "<span></span>"}${deltaHtml}</div>`
+      : "";
   return `<article class="bottle-card" data-id="${b.id}">
     <div class="bottle-image">${img}</div>
     <button class="favorite ${b.favorite ? "on" : ""}" title="Favori">${b.favorite ? "★" : "☆"}</button>
@@ -56,6 +65,7 @@ function card(b) {
       <div class="producer">${escapeHtml(b.producer || "")}</div>
       <div class="meta">${b.vintage ? b.vintage + " • " : ""}${escapeHtml(b.region || "")}</div>
       <div class="card-bottom"><span class="price">${euro(b.currentValue)}</span><span class="qty">× ${b.quantity}</span></div>
+      ${valuesLine}
     </div>
   </article>`;
 }

@@ -1176,3 +1176,25 @@ select:disabled {
 .estimate-row .scan-status {
   margin: 0;
 }
+
+/* Ligne valeurs sur la carte : prix d'achat + plus-value */
+.card-values {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 11px;
+}
+.card-values .buy {
+  color: var(--muted);
+}
+.card-values .delta {
+  font-weight: 700;
+}
+.card-values .delta.up {
+  color: #7bb07b;
+}
+.card-values .delta.down {
+  color: #df7b7b;
+}
